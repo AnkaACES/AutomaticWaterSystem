@@ -1,0 +1,135 @@
+// PROJECT  :Medium ISP Automatic Water System
+// PURPOSE  :This project can water multiple plants at once automatically, and has an LCD to display the moisture and temperature of the plants
+// COURSE   :ICS3U-E1
+// AUTHOR   :Anka Shen
+// DATE     :April 6 2025
+// MCU      :328P
+// STATUS   :Working
+// Reference:http://darcy.rsgc.on.ca/ACES/TEI3M/2425/ISPs.html#logs
+
+// Include the libraries
+#include <LiquidCrystal.h>
+#include "Adafruit_seesaw.h"
+
+// Set up the LCD with the correct pins
+uint8_t RS = 9, EN = 8, D4 = 7, D5 = 6, D6 = 5, D7 = 4;
+LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
+
+// Set up the sensors to be controlled by Seesaw library
+Adafruit_seesaw ss1;
+Adafruit_seesaw ss2;
+
+// Define dimentions of the LCD and delay intervals
+#define LCD_COLUMNS 16
+#define LCD_ROWS 2
+#define INTERVAL 1000           // 1 second between each loop
+#define SWITCH_INTERVAL 10000   // 10 seconds between displaying each plant
+
+// Make a struct for the plants
+struct Plant {
+  const char *name;             // Name of the plant
+  uint8_t pumpPin;              // Pin to pump water to that plant
+  uint8_t sensorAddr;           // The address of the sensor in that plant
+  Adafruit_seesaw *sensor;      // The number of the sensor in that plant
+};
+
+Plant plants[] = {              // Create the plants with their values
+  {"Plant #1", 2, 0x37, &ss1},
+  {"Plant #2", 3, 0x36, &ss2}
+};
+
+uint8_t numPlants = (sizeof(plants) / sizeof(plants[0]));     // The number of plants
+uint8_t currentPlant = 0;
+float lastSwitchTime = 0;
+
+void setup() {
+  lcd.begin(LCD_COLUMNS, LCD_ROWS);                           // Start up the LCD
+  lcd.clear();                                                // Reset the LCD
+
+  for (uint8_t i = 0; i < numPlants; i++) {                   // Start up the sensors and state if there is an error
+    pinMode(plants[i].pumpPin, OUTPUT);
+    if (!(*plants[i].sensor).begin(plants[i].sensorAddr)) {
+      lcd.setCursor(0, i);
+      lcd.print(plants[i].name);
+      lcd.print(" sensor err");
+    }
+  }
+}
+
+// Display the template for the LCD
+void displayTemplate(char *plantName) {                 
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(plantName);
+  lcd.setCursor(0, 1);
+  lcd.print("M:     T:");
+}
+
+// Display the readings from the sensor
+void displayReadings(uint16_t moisture, float temp) {   
+  lcd.setCursor(3, 1);
+  lcd.print(moisture);
+  lcd.print(" ");
+
+  lcd.setCursor(10, 1);
+  lcd.print(temp);
+  lcd.setCursor(14, 1);
+  lcd.write(0xDF);
+  lcd.print("C");
+}
+
+// Activate the selected pump
+void pumpWater(uint8_t pumpPin, uint16_t time, char *plantName) {
+  digitalWrite(pumpPin, HIGH);             // Turn on the pump
+  unsigned long pumpStart = millis();      // Start counting
+  while (millis() - pumpStart < time) {    // Refresh the LCD constantly
+    displayTemplate(plantName);
+    lcd.setCursor(0, 1);
+    lcd.print("Watering...");              // Show that the plant is being watered
+    delay(INTERVAL);
+  }
+  digitalWrite(pumpPin, LOW);              // Turn off the pump
+
+  pumpStart = millis();                    // Start counting again
+  Plant &plant = plants[currentPlant];
+
+  // Refresh LCD and stay on the same plant so it doesn't get too much water
+  while (millis() - pumpStart < SWITCH_INTERVAL) {
+    displayTemplate(plantName);
+    uint16_t moisture = (*plant.sensor).touchRead(0);
+    float temp = (*plant.sensor).getTemp();
+    displayReadings(moisture, temp);
+    delay(INTERVAL);
+  }
+
+  // Switch the plant after waiting
+  currentPlant = (currentPlant + 1) % numPlants;
+  lastSwitchTime = millis();
+}
+
+void loop() {
+  float currentMillis = millis();                           // Start timer
+
+  if (currentMillis - lastSwitchTime >= SWITCH_INTERVAL) {  // Switches plant after SWITCH_INTERVAL milliseconds
+    currentPlant = (currentPlant + 1) % numPlants;
+    lastSwitchTime = currentMillis;
+  }
+
+  Plant &plant = plants[currentPlant];                      // Display the template for the current plant
+  displayTemplate(plant.name);
+
+  uint16_t moisture = (*plant.sensor).touchRead(0);         // Get the values from the sensor
+  float temp = (*plant.sensor).getTemp();
+
+  if (moisture > 0 && temp > -40) {                         // Display the readings on the LCD
+    displayReadings(moisture, temp);
+    if (moisture < 500) {
+      pumpWater(plant.pumpPin, 1000, plant.name);
+    }
+  } else {                                                  // State there is an error if there is
+    lcd.setCursor(0, 1);
+    lcd.print("Sensor error!  ");
+  }
+
+  delay(INTERVAL);                                          // Wait INTERVAL milliseconds between readings
+}
