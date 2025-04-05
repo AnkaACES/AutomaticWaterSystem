@@ -81,7 +81,7 @@ void displayReadings(uint16_t moisture, float temp) {
 // Activate the selected pump
 void pumpWater(uint8_t pumpPin, uint16_t time, char *plantName) {
   digitalWrite(pumpPin, HIGH);             // Turn on the pump
-  unsigned long pumpStart = millis();      // Start counting
+  float pumpStart = millis();      // Start counting
   while (millis() - pumpStart < time) {    // Refresh the LCD constantly
     displayTemplate(plantName);
     lcd.setCursor(0, 1);
